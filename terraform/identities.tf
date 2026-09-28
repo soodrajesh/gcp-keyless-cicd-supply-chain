@@ -86,3 +86,11 @@ resource "google_cloud_run_v2_service_iam_member" "operator_invoke" {
   role     = "roles/run.invoker"
   member   = "user:${var.admin_email}"
 }
+
+# The rogue-image drill signs an image as a DIFFERENT identity than the pipeline. kcs-runtime holds no
+# roles, so letting the operator mint tokens as it grants nothing beyond what the operator already has.
+resource "google_service_account_iam_member" "operator_drill_identity" {
+  service_account_id = google_service_account.sa["kcs-runtime"].name
+  role               = "roles/iam.serviceAccountTokenCreator"
+  member             = "user:${var.admin_email}"
+}

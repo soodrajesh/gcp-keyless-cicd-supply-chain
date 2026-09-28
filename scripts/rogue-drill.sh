@@ -3,7 +3,7 @@
 # approve are pushed, and the DEPLOY workflow (on main, with real credentials) is asked to ship
 # each one. It must refuse both, leave production untouched, and still ship the genuine image.
 #   1. UNSIGNED         built and pushed from this laptop
-#   2. WRONG SIGNER     validly signed via Sigstore — but as a human (Google identity), not the pipeline
+#   2. WRONG SIGNER     validly signed via Sigstore — but by a different identity (kcs-runtime), not the pipeline
 # Prints one result line per stage; test.sh asserts on them.
 source "$(dirname "$0")/lib.sh"
 need docker; need cosign; need gh; need gcloud
@@ -33,13 +33,14 @@ STAMP="$(date +%H%M%S)"
 D1="$(push_rogue "rogue-unsigned-$STAMP" unsigned)"; ok "pushed $D1"
 attempt unsigned "$D1"
 
-log "Rogue 2: signed by a human identity via Sigstore, not by the pipeline"
-D2="$(push_rogue "rogue-human-$STAMP" human)"; ok "pushed $D2"
-TOKEN="$(gcloud auth print-identity-token --audiences=sigstore)"
-cosign sign --yes --identity-token "$TOKEN" "$IMAGE@$D2" >/dev/null 2>&1 && ok "signed as $(gcloud config get-value account 2>/dev/null) (a real, valid Sigstore signature)"
-SIGNER="$ADMIN_EMAIL" ISSUER="https://accounts.google.com" "$ROOT/scripts/verify.sh" "$D2" --signature-only >/dev/null 2>&1 \
-  && echo "RESULT human signature_valid_for_human=yes" || echo "RESULT human signature_valid_for_human=NO"
-attempt human "$D2"
+log "Rogue 2: validly signed via Sigstore, but by a different identity than the pipeline"
+OTHER="kcs-runtime@${PROJECT_ID}.iam.gserviceaccount.com"
+D2="$(push_rogue "rogue-otheridentity-$STAMP" otheridentity)"; ok "pushed $D2"
+TOKEN="$(gcloud auth print-identity-token --impersonate-service-account="$OTHER" --audiences=sigstore --include-email 2>/dev/null)"
+cosign sign --yes --identity-token "$TOKEN" "$IMAGE@$D2" >/dev/null 2>&1 && ok "signed as $OTHER (a real, valid Sigstore signature)"
+SIGNER="$OTHER" ISSUER="https://accounts.google.com" "$ROOT/scripts/verify.sh" "$D2" --signature-only >/dev/null 2>&1 \
+  && echo "RESULT other signature_valid_for_that_identity=yes" || echo "RESULT other signature_valid_for_that_identity=NO"
+attempt other "$D2"
 
 log "Control: the genuine, pipeline-signed image is accepted by the same workflow"
 attempt genuine "$GOOD"
