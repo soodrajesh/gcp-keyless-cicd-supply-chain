@@ -25,7 +25,10 @@ attempt() { # <label> <digest> ; prints RESULT lines
   read -r run conclusion < <(run_workflow deploy.yml main -f "digest=$digest")
   failed_step="$(gh run view "$run" --repo "$GH_REPO" --json jobs --jq '[.jobs[].steps[]|select(.conclusion=="failure")|.name]|first // "none"')"
   echo "RESULT $label conclusion=$conclusion failed_step=$failed_step run=$run"
-  echo "RESULT $label served_unchanged=$([ "$(served_digest)" = "$GOOD" ] && echo yes || echo NO)"
+  # The property that matters is "the rogue digest never got served" — NOT "production is byte-identical
+  # to what it was when the drill started". A genuine release triggered by an unrelated push can land a
+  # newer, equally legitimate digest in between; that must not fail this check.
+  echo "RESULT $label rogue_not_served=$([ "$(served_digest)" != "$digest" ] && echo yes || echo NO)"
 }
 
 log "Rogue 1: unsigned image pushed from this machine"

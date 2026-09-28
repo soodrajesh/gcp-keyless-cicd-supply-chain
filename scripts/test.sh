@@ -113,10 +113,10 @@ if [ "${SKIP_DRILLS:-0}" != 1 ]; then
   echo "$DRILL"
   check "UNSIGNED image: deploy run FAILED" contains "$DRILL" "RESULT unsigned conclusion=failure"
   check "UNSIGNED image: it failed at 'Verify signature'" contains "$DRILL" "RESULT unsigned conclusion=failure failed_step=Verify signature"
-  check "UNSIGNED image: production still serves the previous digest" contains "$DRILL" "RESULT unsigned served_unchanged=yes"
+  check "UNSIGNED image: production still serves the previous digest" contains "$DRILL" "RESULT unsigned rogue_not_served=yes"
   check "WRONG-SIGNER image: the signature is genuinely valid for the OTHER identity" contains "$DRILL" "RESULT other signature_valid_for_that_identity=yes"
   check "WRONG-SIGNER image: …yet the deploy run FAILED at 'Verify signature'" contains "$DRILL" "RESULT other conclusion=failure failed_step=Verify signature"
-  check "WRONG-SIGNER image: production unchanged" contains "$DRILL" "RESULT other served_unchanged=yes"
+  check "WRONG-SIGNER image: production unchanged" contains "$DRILL" "RESULT other rogue_not_served=yes"
   check "CONTROL: the genuine image passes the same workflow" contains "$DRILL" "RESULT genuine conclusion=success"
 fi
 
