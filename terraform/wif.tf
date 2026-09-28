@@ -5,7 +5,7 @@
 resource "google_iam_workload_identity_pool" "gh" {
   project                   = var.project_id
   workload_identity_pool_id = "gh-${var.suffix}"
-  display_name              = "GitHub Actions (${var.github_repo})"
+  display_name              = "GitHub Actions"
   depends_on                = [google_project_service.apis]
 }
 
