@@ -64,7 +64,7 @@ jobs:
         id: push
         run: |
           echo "${{ steps.auth.outputs.access_token }}" | docker login -u oauth2accesstoken --password-stdin "$REGISTRY"
-          TAG="sha-${GITHUB_SHA::12}"
+          TAG="build-${GITHUB_RUN_NUMBER}-${GITHUB_SHA::7}"
           docker tag candidate:build "$IMAGE:$TAG"
           docker push "$IMAGE:$TAG"
           DIGEST="$(docker inspect --format '{{index .RepoDigests 0}}' "$IMAGE:$TAG" | cut -d@ -f2)"

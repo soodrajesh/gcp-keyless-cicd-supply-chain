@@ -69,9 +69,9 @@ check "authenticated request served (200)" eq "$(curl -s -o /dev/null -w '%{http
 check "served build reports a commit that exists on origin/main" contains "$(gh api "repos/$GH_REPO/commits/$(jq -r .version <<<"$BODY")" --jq .sha 2>/dev/null)" "$(jq -r .version <<<"$BODY")"
 check "served build reports the workflow run that built it" contains "$(jq -r .built_by <<<"$BODY")" "/actions/runs/"
 check "Cloud Run serves a digest, not a mutable tag" contains "$DIGEST" "sha256:"
-check "the served digest is the one the release run pushed (tag sha-<commit> resolves to it)" \
-  eq "$(gcloud artifacts docker images describe "$IMAGE:sha-$(jq -r .version <<<"$BODY" | cut -c1-7)" --format='get(image_summary.digest)' 2>/dev/null || \
-        gcloud artifacts docker tags list "$AR_REPO/app" --format='value(tag,version)' | grep -m1 "sha-" | awk '{print $2}' | sed 's#.*/##')" "$DIGEST"
+SERVED_SHA="$(jq -r .version <<<"$BODY")"
+check "the served digest is the one a release run pushed under tag build-<n>-$SERVED_SHA" \
+  eq "$(gcloud artifacts docker tags list "$AR_REPO/app" --format='value(tag,version)' | sed 's#projects/[^ ]*/tags/##; s#\t[^ ]*/versions/# #' | awk -v s="-$SERVED_SHA" '$1 ~ s {print $2}' | head -1)" "$DIGEST"
 
 log "6. Signature, SBOM and provenance verify from outside (no secrets on this machine)"
 check "signature verifies against the release.yml identity" "$ROOT/scripts/verify.sh" "$DIGEST" --signature-only
@@ -86,7 +86,7 @@ SBOM_COMPONENTS="$(cosign verify-attestation --type cyclonedx "$IMAGE@$DIGEST" -
 check "the SBOM is real: it lists $SBOM_COMPONENTS components" ge "$SBOM_COMPONENTS" 10
 
 log "7. Tags are immutable"
-TAG="$(gcloud artifacts docker tags list "$AR_REPO/app" --format='value(tag)' 2>/dev/null | grep '^sha-' | head -1)"
+TAG="$(gcloud artifacts docker tags list "$AR_REPO/app" --format='value(tag)' 2>/dev/null | sed 's#.*/##' | grep '^build-' | head -1)"
 IMM="$(mktemp -d)"; printf 'FROM scratch\nLABEL tamper=1\n' > "$IMM/Dockerfile"
 docker build -q -t "$IMAGE:$TAG" "$IMM" >/dev/null 2>&1
 check "re-pushing an existing release tag with different content is refused" fails docker push -q "$IMAGE:$TAG"
