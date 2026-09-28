@@ -69,13 +69,28 @@ jobs:
         run: |
           gcloud run deploy "$SERVICE" --region "$REGION" --image "$IMAGE@$DIGEST" \
             --no-allow-unauthenticated --quiet
-      - name: Smoke test the private service with an identity token
+      - name: Resolve the service URL
+        id: svc
         run: |
-          URL="$(gcloud run services describe "$SERVICE" --region "$REGION" --format='value(status.url)')"
-          SERVED="$(gcloud run services describe "$SERVICE" --region "$REGION" --format='value(status.latestReadyRevisionName)')"
-          TOKEN="$(gcloud auth print-identity-token --audiences="$URL")"
-          BODY="$(curl -sf -H "Authorization: Bearer $TOKEN" "$URL/")"
-          echo "revision $SERVED answered: $BODY"
+          echo "url=$(gcloud run services describe "$SERVICE" --region "$REGION" --format='value(status.url)')" >> "$GITHUB_OUTPUT"
+          echo "revision=$(gcloud run services describe "$SERVICE" --region "$REGION" --format='value(status.latestReadyRevisionName)')" >> "$GITHUB_OUTPUT"
+      - name: Mint an identity token for the service (the deployer may invoke it; nothing else may)
+        id: idtoken
+        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3
+        with:
+          workload_identity_provider: ${{ vars.WIF_PROVIDER }}
+          service_account: ${{ vars.DEPLOYER_SA }}
+          token_format: id_token
+          id_token_audience: ${{ steps.svc.outputs.url }}
+          id_token_include_email: true
+      - name: Smoke test the private service
+        env:
+          URL: ${{ steps.svc.outputs.url }}
+          REVISION: ${{ steps.svc.outputs.revision }}
+          ID_TOKEN: ${{ steps.idtoken.outputs.id_token }}
+        run: |
+          BODY="$(curl -sf -H "Authorization: Bearer $ID_TOKEN" "$URL/")"
+          echo "revision $REVISION answered: $BODY"
           if [ -n "$EXPECT_SHA" ]; then
             [ "$(echo "$BODY" | jq -r .version)" = "${EXPECT_SHA::7}" ] || { echo "::error::deployed build is not the commit that was released"; exit 1; }
           fi
