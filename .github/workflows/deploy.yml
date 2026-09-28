@@ -1,0 +1,81 @@
+# Verifies, then deploys an image BY DIGEST. Runs after a release (workflow_call) or by hand
+# (workflow_dispatch) — the latter is how a rollback, or the rogue-image drill, happens.
+# It refuses anything not signed by release.yml on main, however it got into the registry.
+name: deploy
+on:
+  workflow_call:
+    inputs:
+      digest: { required: true, type: string }
+      expect_sha: { required: false, type: string, default: "" }
+  workflow_dispatch:
+    inputs:
+      digest:
+        description: "Image digest to deploy, e.g. sha256:<64 hex>"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+      attestations: read
+    env:
+      DIGEST: ${{ inputs.digest }}
+      EXPECT_SHA: ${{ inputs.expect_sha }}
+      REGION: ${{ vars.REGION }}
+      SERVICE: ${{ vars.SERVICE_NAME }}
+      IMAGE: ${{ vars.REGION }}-docker.pkg.dev/${{ vars.PROJECT_ID }}/keyless/app
+      SIGNER: https://github.com/${{ github.repository }}/.github/workflows/release.yml@refs/heads/main
+      ISSUER: https://token.actions.githubusercontent.com
+    steps:
+      - name: Validate the digest input (it is passed through env, never interpolated into a script)
+        run: |
+          [[ "$DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]] || { echo "::error::not an image digest"; exit 1; }
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with: { persist-credentials: false }
+      - uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3
+        with:
+          workload_identity_provider: ${{ vars.WIF_PROVIDER }}
+          service_account: ${{ vars.DEPLOYER_SA }}
+      - uses: google-github-actions/setup-gcloud@aa5489c8933f4cc7a4f7d45035b3b1440c9c10db # v3.0.1
+      - uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+        with:
+          cosign-release: v3.1.3
+      - name: Verify signature
+        run: |
+          gcloud auth configure-docker "${REGION}-docker.pkg.dev" --quiet
+          cosign verify "$IMAGE@$DIGEST" --certificate-identity "$SIGNER" --certificate-oidc-issuer "$ISSUER" >/dev/null
+          echo "signature OK: signed by $SIGNER"
+      - name: Verify SBOM attestation
+        run: |
+          cosign verify-attestation --type cyclonedx "$IMAGE@$DIGEST" --certificate-identity "$SIGNER" --certificate-oidc-issuer "$ISSUER" >/dev/null
+          echo "SBOM attestation OK"
+      - name: Verify SLSA build provenance
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh attestation verify "oci://$IMAGE@$DIGEST" --repo "$GITHUB_REPOSITORY" --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/release.yml" >/dev/null
+          echo "provenance OK"
+      - name: Deploy by digest
+        run: |
+          gcloud run deploy "$SERVICE" --region "$REGION" --image "$IMAGE@$DIGEST" \
+            --no-allow-unauthenticated --quiet
+      - name: Smoke test the private service with an identity token
+        run: |
+          URL="$(gcloud run services describe "$SERVICE" --region "$REGION" --format='value(status.url)')"
+          SERVED="$(gcloud run services describe "$SERVICE" --region "$REGION" --format='value(status.latestReadyRevisionName)')"
+          TOKEN="$(gcloud auth print-identity-token --impersonate-service-account="${{ vars.DEPLOYER_SA }}" --audiences="$URL" --include-email)"
+          BODY="$(curl -sf -H "Authorization: Bearer $TOKEN" "$URL/")"
+          echo "revision $SERVED answered: $BODY"
+          if [ -n "$EXPECT_SHA" ]; then
+            [ "$(echo "$BODY" | jq -r .version)" = "${EXPECT_SHA::7}" ] || { echo "::error::deployed build is not the commit that was released"; exit 1; }
+          fi
