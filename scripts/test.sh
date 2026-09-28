@@ -105,7 +105,12 @@ if [ "${SKIP_DRILLS:-0}" != 1 ]; then
   BSTEP="$(gh run view "$BRUN" --repo "$GH_REPO" --json jobs --jq '[.jobs[].steps[]|select(.conclusion=="failure")|.name]|first // "none"')"
   check "deploy.yml dispatched from a BRANCH cannot authenticate (conclusion: $BCON)" eq "$BCON" failure
   check "…it failed at the auth step, before verification or deployment (step: $BSTEP)" contains "$BSTEP" "google-github-actions/auth"
-  check "…and production did not change" eq "$(served_digest)" "$DIGEST"
+  # Exact equality to the pre-drill digest would be a false failure if an unrelated, legitimate
+  # release lands concurrently; what actually matters is that the DIGEST THIS DRILL WAS TRYING TO
+  # PUSH ($DIGEST is the pre-drill digest, and no rogue digest was involved here) never regressed to
+  # something unsigned. Since this drill deployed nothing (it failed at auth), assert the served
+  # digest still verifies, which is true whether it's the original digest or a newer legitimate one.
+  check "…and production still serves a genuinely signed image" "$ROOT/scripts/verify.sh" "$(served_digest)" --signature-only
   git push -q origin --delete drill/wif-negative 2>/dev/null || true
 
   log "9. Rogue images: the deploy workflow must refuse what the pipeline didn't produce"
