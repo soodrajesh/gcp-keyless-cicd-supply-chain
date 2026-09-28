@@ -73,7 +73,7 @@ jobs:
         run: |
           URL="$(gcloud run services describe "$SERVICE" --region "$REGION" --format='value(status.url)')"
           SERVED="$(gcloud run services describe "$SERVICE" --region "$REGION" --format='value(status.latestReadyRevisionName)')"
-          TOKEN="$(gcloud auth print-identity-token --impersonate-service-account="${{ vars.DEPLOYER_SA }}" --audiences="$URL" --include-email)"
+          TOKEN="$(gcloud auth print-identity-token --audiences="$URL")"
           BODY="$(curl -sf -H "Authorization: Bearer $TOKEN" "$URL/")"
           echo "revision $SERVED answered: $BODY"
           if [ -n "$EXPECT_SHA" ]; then
