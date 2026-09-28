@@ -70,8 +70,8 @@ check "served build reports a commit that exists on origin/main" contains "$(gh 
 check "served build reports the workflow run that built it" contains "$(jq -r .built_by <<<"$BODY")" "/actions/runs/"
 check "Cloud Run serves a digest, not a mutable tag" contains "$DIGEST" "sha256:"
 SERVED_SHA="$(jq -r .version <<<"$BODY")"
-check "the served digest is the one a release run pushed under tag build-<n>-$SERVED_SHA" \
-  eq "$(gcloud artifacts docker tags list "$AR_REPO/app" --format='value(tag,version)' | sed 's#projects/[^ ]*/tags/##; s#\t[^ ]*/versions/# #' | awk -v s="-$SERVED_SHA" '$1 ~ s {print $2}' | head -1)" "$DIGEST"
+check "the served digest was pushed under a tag for this exact commit (build-<n>-$SERVED_SHA)" \
+  ge "$(gcloud artifacts docker tags list "$AR_REPO/app" --format='value(tag,version)' | awk -v d="$DIGEST" -v s="-$SERVED_SHA" '$2==d && $1 ~ s' | wc -l | tr -d ' ')" 1
 
 log "6. Signature, SBOM and provenance verify from outside (no secrets on this machine)"
 check "signature verifies against the release.yml identity" "$ROOT/scripts/verify.sh" "$DIGEST" --signature-only
